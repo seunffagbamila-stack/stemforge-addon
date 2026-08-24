@@ -26,7 +26,7 @@ from aqt.qt import (
 from aqt.utils import tooltip, showInfo
 
 ADDON_NAME = __name__
-ADDON_VERSION = "1.0.0"
+ADDON_VERSION = "1.0.1"
 
 # Set this once before you package and distribute the add-on. Not user-editable - end users
 # only ever see the license key and style, never this URL or anything Stripe-related.
