@@ -26,7 +26,7 @@ from aqt.qt import (
 from aqt.utils import tooltip, showInfo
 
 ADDON_NAME = __name__
-ADDON_VERSION = "1.0.1"
+ADDON_VERSION = "1.0.2"
 
 # Set this once before you package and distribute the add-on. Not user-editable - end users
 # only ever see the license key and style, never this URL or anything Stripe-related.
@@ -176,9 +176,8 @@ def check_for_update():
         msg.setWindowTitle("StemForge update available")
         msg.setText(
             f"A new version of StemForge ({latest}) is available.\n\n"
-            "Click Download to open the download page in your browser. Once it's downloaded, "
-            "double-click the .ankiaddon file (or use Tools \u2192 Add-ons \u2192 Install from file) "
-            "and Anki will update StemForge in place - your license key and settings are kept."
+            "Click Update to download and install it automatically. You'll need to restart "
+            "Anki afterward for it to take effect - your license key and settings are kept."
         )
         try:
             accept_role = QMessageBox.ButtonRole.AcceptRole
@@ -186,15 +185,52 @@ def check_for_update():
         except AttributeError:
             accept_role = QMessageBox.AcceptRole
             reject_role = QMessageBox.RejectRole
-        download_btn = msg.addButton("Download", accept_role)
+        update_btn = msg.addButton("Update", accept_role)
         msg.addButton("Later", reject_role)
         msg.exec()
-        if msg.clickedButton() == download_btn:
-            webbrowser.open(download_url)
+        if msg.clickedButton() == update_btn:
+            threading.Thread(
+                target=download_and_install_update, args=(download_url,), daemon=True
+            ).start()
 
     mw.taskman.run_on_main(notify)
     state["last_notified_version"] = latest
     _write_update_state(state)
+
+
+def download_and_install_update(download_url: str):
+    """Best-effort automatic update: downloads the new .ankiaddon and installs it in place via
+    Anki's own AddonManager.install() - the same thing "Install from file" does - so the person
+    doesn't have to manually find and double-click a downloaded file. This uses a less-formally-
+    documented part of Anki's API that isn't guaranteed identical across every Anki version, so
+    it must never be the only path: any failure at any step falls back to just opening the
+    download link in a browser, same as before this existed."""
+    import tempfile
+
+    try:
+        req = urllib.request.Request(download_url)
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = resp.read()
+        with tempfile.NamedTemporaryFile(suffix=".ankiaddon", delete=False) as f:
+            f.write(data)
+            temp_path = f.name
+    except Exception:
+        mw.taskman.run_on_main(lambda: webbrowser.open(download_url))
+        return
+
+    def install_on_main():
+        try:
+            mw.addonManager.install(temp_path)
+            showInfo("StemForge has been updated. Please restart Anki for it to take effect.")
+        except Exception:
+            webbrowser.open(download_url)
+            showInfo(
+                "Automatic install didn't work, so the download page was opened instead. "
+                "Double-click the downloaded file (or use Tools \u2192 Add-ons \u2192 Install "
+                "from file) to finish updating."
+            )
+
+    mw.taskman.run_on_main(install_on_main)
 
 
 def strip_html_to_text(raw_html: str) -> str:
