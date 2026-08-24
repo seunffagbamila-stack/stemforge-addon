@@ -26,7 +26,7 @@ from aqt.qt import (
 from aqt.utils import tooltip, showInfo
 
 ADDON_NAME = __name__
-ADDON_VERSION = "1.0.2"
+ADDON_VERSION = "1.0.3"
 
 # Set this once before you package and distribute the add-on. Not user-editable - end users
 # only ever see the license key and style, never this URL or anything Stripe-related.
@@ -249,20 +249,33 @@ IMG_TAG_PATTERN = re.compile(r"<img[^>]+src=[\"']([^\"']+)[\"'][^>]*>", re.IGNOR
 
 
 def extract_images(card) -> list[str]:
-    """Returns a list of media filenames (e.g. 'eye_dendritic.jpg') that actually appear on the
-    QUESTION side of the card - not just anywhere on the note. This matters a lot for note types
-    like AnKing's Cloze cards, where mnemonic images commonly live in an "Extra" field that only
-    ever renders on the answer side: scanning every note field (as this used to do) pulled those
-    answer-only images onto the rephrased question, visually leaking the answer before the
-    student had even guessed. card.question() is Anki's own rendering of what belongs on the
-    front - using it instead of guessing via raw field iteration is the correct fix, and it
-    still naturally includes any image that's embedded directly in a field shown on both sides
-    (e.g. a lab photo sitting next to a cloze deletion in the same field).
-    Anki's card webview already resolves bare filenames like this relative to the collection's
-    media folder, so these can be dropped straight into an <img src="..."> tag elsewhere in the
-    same webview without needing to resolve a full path ourselves."""
+    """Returns a list of media filenames (e.g. 'eye_dendritic.jpg') that are genuine question-
+    relevant content - not decoration and not an answer leak. Two filters, both needed:
+
+    1. Must render on the QUESTION side (card.question(), Anki's own rendering of the front).
+       This matters for note types like AnKing's Cloze cards, where mnemonic images commonly
+       live in an "Extra" field that only renders on the answer side - scanning every note
+       field (an earlier version of this function did) pulled those answer-only images onto
+       the rephrased question, visually leaking the answer before the student had even guessed.
+
+    2. Must actually be part of the NOTE'S FIELD CONTENT (note.values()), not just present in
+       the rendered question HTML. Some deck templates (AnKing's among them) bake a logo or
+       other decorative graphic directly into the card TEMPLATE itself rather than into any
+       field - that image renders identically on every single card of that note type, and
+       without this filter it would get attached to every rephrased question as if it were
+       relevant content. Intersecting with the note's actual field images excludes anything
+       that's template-level decoration rather than card-specific substance, while still
+       respecting the front/back boundary from filter 1.
+    """
     try:
-        return IMG_TAG_PATTERN.findall(card.question())
+        question_image_list = IMG_TAG_PATTERN.findall(card.question())
+        if not question_image_list:
+            return []
+        note = card.note()
+        field_images = set()
+        for value in note.values():
+            field_images.update(IMG_TAG_PATTERN.findall(value))
+        return [img for img in question_image_list if img in field_images]
     except Exception:
         return []
 
